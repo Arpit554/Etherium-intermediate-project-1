@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract TicketingSystem {
+    address public owner;
+    uint public nextEventId = 1;
+
+    enum TicketStatus { Available, Sold, Refunded }
+
+    struct Event {
+        uint id;
+        address organizer;
+        string name;
+        string description;
+        uint ticketPrice;
+        uint totalTickets;
+        uint ticketsSold;
+        TicketStatus status;
+    }
+
+    mapping(uint => Event) public events;
+    mapping(address => mapping(uint => bool)) public ticketsOwned;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only the contract owner can perform this action");
+        _;
+    }
+
+    function createEvent(string memory _name, string memory _description, uint _ticketPrice, uint _totalTickets) external {
+        require(bytes(_name).length > 0, "Name must not be empty");
+        require(bytes(_description).length > 0, "Description must not be empty");
+        require(_ticketPrice > 0, "Ticket price must be greater than zero");
+        require(_totalTickets > 0, "Total tickets must be greater than zero");
+
+        events[nextEventId] = Event(nextEventId, msg.sender, _name, _description, _ticketPrice, _totalTickets, 0, TicketStatus.Available);
+
+        nextEventId++;
+    }
+
+    function purchaseTicket(uint _eventId) external payable {
+        require(_eventId > 0 && _eventId < nextEventId, "Invalid event ID");
+        require(events[_eventId].status == TicketStatus.Available, "Tickets are not available for this event");
+        require(events[_eventId].ticketsSold < events[_eventId].totalTickets, "All tickets are sold out");
+        require(msg.value >= events[_eventId].ticketPrice, "Insufficient funds");
+
+        events[_eventId].ticketsSold++;
+        ticketsOwned[msg.sender][_eventId] = true;
+
+        // Use assert to check if tickets sold does not exceed total tickets (this should never happen)
+        assert(events[_eventId].ticketsSold <= events[_eventId].totalTickets);
+
+        // Refund excess payment
+        if (msg.value > events[_eventId].ticketPrice) {
+            payable(msg.sender).transfer(msg.value - events[_eventId].ticketPrice);
+        }
+    }
+
+    function refundTicket(uint _eventId) external {
+        require(_eventId > 0 && _eventId < nextEventId, "Invalid event ID");
+        require(ticketsOwned[msg.sender][_eventId], "Sender does not own a ticket for this event");
+        require(events[_eventId].status == TicketStatus.Available || events[_eventId].status == TicketStatus.Sold, "Event is not refundable");
+
+        events[_eventId].ticketsSold--;
+        ticketsOwned[msg.sender][_eventId] = false;
+
+        // Use assert to check if tickets sold is non-negative (this should never happen)
+        assert(events[_eventId].ticketsSold >= 0);
+
+        // Refund ticket price
+        payable(msg.sender).transfer(events[_eventId].ticketPrice);
+    }
+
+    function emergencyStop() view external onlyOwner {
+        // Emergency stop function using revert
+        revert("Ticketing system is stopped due to emergency");
+    }
+
+    // Fallback function to receive ether
+    receive() external payable {}
+}
